@@ -1,0 +1,11 @@
+{
+    "Pr\u00e9 Marseille": {
+        "total": 110.0,
+        "expenses": [
+            {
+                "name": "Bieres",
+                "amount": 6.45
+            }
+        ]
+    }
+}
