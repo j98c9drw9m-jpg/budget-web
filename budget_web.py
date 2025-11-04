@@ -1,7 +1,9 @@
 from flask import Flask, render_template_string, request, redirect
 import json, os
 
-DATA_FILE = "budget_mensuel.json"
+# Chemin du fichier JSON dans un dossier temporaire (autorisé par Render)
+DATA_FILE = "/tmp/budget_mensuel.json"
+
 app = Flask(__name__)
 
 # Charger et sauvegarder les données
@@ -145,4 +147,4 @@ def delete_expense(name, index):
     return redirect(f"/open/{name}")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
