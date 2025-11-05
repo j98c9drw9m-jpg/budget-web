@@ -276,6 +276,21 @@ def delete_expense(name, index):
 # 🚀 Lancement
 # ----------------------------------------
 if __name__ == "__main__":
+
     print("🚀 Lancement de l'application Flask...")
     load_from_github()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+    print("🚀 Lancement de l'application Flask V2...")
+    
+    # Recharge les données depuis GitHub à chaque redémarrage
+    load_from_github()
+    
+    # Si le fichier local a disparu (Render a vidé /tmp), on le recrée à partir du GitHub
+    if not os.path.exists(DATA_FILE):
+        print("⚠️ Fichier introuvable, création d’un nouveau budget local à partir de GitHub...")
+        save_to_github()
+    
+    # Lancement du serveur Flask
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
