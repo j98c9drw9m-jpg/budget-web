@@ -61,7 +61,6 @@ def save_to_github():
         msg = "Update budget data"
         sha = None
 
-        # Vérifie si le fichier existe déjà
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
             sha = r.json()["sha"]
