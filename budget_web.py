@@ -1,14 +1,88 @@
 from flask import Flask, render_template_string, request, redirect
-import json, os
+import json, os, base64, requests
 
 # ----------------------------------------
-# Configuration générale
+# ⚙️ Configuration
 # ----------------------------------------
 DATA_FILE = "/tmp/budget_mensuel.json"
+GITHUB_REPO = "j98c9drw9m-jpg/budget-data"  # ⚠️ Mets ici ton dépôt exact
+GITHUB_FILE_PATH = "budget_mensuel.json"
+
 app = Flask(__name__)
 
 # ----------------------------------------
-# Gestion du stockage JSON
+# 🔐 Gestion du token GitHub
+# ----------------------------------------
+def get_github_headers():
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        print("❌ [DEBUG] GITHUB_TOKEN est vide ou non défini !")
+        raise ValueError("❌ GITHUB_TOKEN non défini dans Render")
+    else:
+        print(f"✅ [DEBUG] GITHUB_TOKEN détecté (longueur = {len(token)})")
+
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "budget-web-app"
+    }
+
+# ----------------------------------------
+# ☁️ Lecture et sauvegarde GitHub
+# ----------------------------------------
+def load_from_github():
+    """Télécharge le fichier JSON depuis GitHub"""
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+    try:
+        r = requests.get(url, headers=get_github_headers())
+        if r.status_code == 200:
+            content = base64.b64decode(r.json()["content"]).decode("utf-8")
+            with open(DATA_FILE, "w") as f:
+                f.write(content)
+            print("✅ Données chargées depuis GitHub.")
+        else:
+            print(f"⚠️ Aucun fichier trouvé sur GitHub ({r.status_code}). Création d'un nouveau.")
+    except Exception as e:
+        print("❌ Erreur lors du chargement depuis GitHub :", e)
+
+def save_to_github():
+    """Sauvegarde le fichier JSON sur GitHub"""
+    try:
+        if not os.path.exists(DATA_FILE):
+            print("⚠️ Aucun fichier local à sauvegarder.")
+            return
+
+        with open(DATA_FILE, "r") as f:
+            content = f.read()
+        encoded = base64.b64encode(content.encode()).decode("utf-8")
+
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+        headers = get_github_headers()
+        msg = "Update budget data"
+        sha = None
+
+        # Vérifie si le fichier existe déjà
+        r = requests.get(url, headers=headers)
+        if r.status_code == 200:
+            sha = r.json()["sha"]
+
+        data = {"message": msg, "content": encoded}
+        if sha:
+            data["sha"] = sha
+
+        print("🛰️ Envoi vers GitHub :", url)
+        r = requests.put(url, headers=headers, json=data)
+
+        if r.status_code in [200, 201]:
+            print("💾 Données sauvegardées sur GitHub.")
+        else:
+            print(f"❌ Erreur lors de la sauvegarde : {r.status_code} {r.text}")
+
+    except Exception as e:
+        print("❌ Erreur fatale lors de save_to_github():", e)
+
+# ----------------------------------------
+# 💾 Lecture & écriture locale
 # ----------------------------------------
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -19,9 +93,10 @@ def load_data():
 def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
+    save_to_github()
 
 # ----------------------------------------
-# Page principale : résumé global
+# 🖥️ Interface principale
 # ----------------------------------------
 @app.route("/")
 def index():
@@ -49,39 +124,17 @@ def index():
     <html>
     <head>
       <meta charset="utf-8">
-      <title>💰 Mon budget mensuel</title>
+      <title>Budget mensuel</title>
       <style>
-        body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 30px; }
+        body { font-family: Arial; background: #111; color: #eee; margin: 20px; }
         h1, h2 { color: #5ee65a; }
-        .box { background: #222; padding: 15px; margin: 20px 0; border-radius: 10px; }
-        input, button { padding: 6px; border-radius: 6px; border: none; }
-        button { background: #5ee65a; cursor: pointer; margin-top: 6px; }
-        button:hover { background: #4ed64a; }
+        .box { background: #222; padding: 15px; margin: 10px 0; border-radius: 10px; }
+        input, button { padding: 5px; border-radius: 5px; border: none; }
+        button { background: #5ee65a; cursor: pointer; margin-top: 5px; }
         a { color: #5ee65a; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        .inline-links a { margin-right: 10px; }
-
-        /* Barre de progression */
-        .progress-container {
-          width: 100%;
-          background-color: #333;
-          border-radius: 10px;
-          margin-top: 5px;
-          height: 14px;
-        }
-        .progress-bar {
-          height: 14px;
-          border-radius: 10px;
-          transition: width 0.5s;
-        }
-
-        .small-text { font-size: 0.9em; color: #aaa; }
+        .progress-container { width: 100%; background-color: #333; border-radius: 10px; height: 14px; margin-top: 5px; }
+        .progress-bar { height: 14px; border-radius: 10px; transition: width 0.5s; }
       </style>
-      <script>
-        function confirmDeleteCategory(name) {
-          return confirm('Supprimer la catégorie "' + name + '" ? Toutes les dépenses associées seront effacées.');
-        }
-      </script>
     </head>
     <body>
       <h1>💰 Mon budget mensuel</h1>
@@ -99,28 +152,22 @@ def index():
 
       <div class="box">
         <h2>Catégories</h2>
-        {% if categories %}
-          {% for cat in categories %}
-            {% set ratio = (cat.remaining / cat.budget) if cat.budget > 0 else 1 %}
-            {% set color = 'lime' %}
-            {% if ratio < 0.2 %}
-              {% set color = 'red' %}
-            {% elif ratio < 0.5 %}
-              {% set color = 'orange' %}
-            {% endif %}
-            <p><b>{{cat.name}}</b> — Budget {{cat.budget}} €, Dépensé {{cat.spent}} €</p>
-            <div class="progress-container">
-              <div class="progress-bar" style="width:{{cat.percent}}%; background-color:{{color}};"></div>
-            </div>
-            <div class="inline-links small-text">
-              <a href="/open/{{cat.name}}">🔍 ouvrir</a> |
-              <a href="/delete_category/{{cat.name}}" onclick="return confirmDeleteCategory('{{cat.name}}')" style="color:red;">🗑️ supprimer</a>
-            </div>
-            <hr style="border: none; border-bottom: 1px solid #333; margin: 15px 0;">
-          {% endfor %}
-        {% else %}
-          <p>Aucune catégorie pour le moment.</p>
-        {% endif %}
+        {% for cat in categories %}
+          {% set color = 'lime' %}
+          {% if cat.remaining / cat.budget < 0.2 %}
+            {% set color = 'red' %}
+          {% elif cat.remaining / cat.budget < 0.5 %}
+            {% set color = 'orange' %}
+          {% endif %}
+          <p><b>{{cat.name}}</b> — Budget {{cat.budget}} €, Dépensé {{cat.spent}} €</p>
+          <div class="progress-container">
+            <div class="progress-bar" style="width:{{cat.percent}}%; background-color:{{color}};"></div>
+          </div>
+          <p>
+            <a href="/open/{{cat.name}}">ouvrir</a> |
+            <a href="/delete_category/{{cat.name}}" style="color:red;">supprimer</a>
+          </p>
+        {% endfor %}
         <form action="/add_category" method="post">
           <input name="name" placeholder="Nom catégorie" required>
           <input name="budget" placeholder="Budget (€)" required>
@@ -133,7 +180,7 @@ def index():
                                   remaining_global=remaining_global, categories=categories)
 
 # ----------------------------------------
-# Modification du revenu
+# 🧾 Routes de gestion
 # ----------------------------------------
 @app.route("/set_income", methods=["POST"])
 def set_income():
@@ -145,15 +192,10 @@ def set_income():
     save_data(data)
     return redirect("/")
 
-# ----------------------------------------
-# Ajout / suppression de catégories
-# ----------------------------------------
 @app.route("/add_category", methods=["POST"])
 def add_category():
     data = load_data()
-    name = request.form["name"].strip()
-    if not name:
-        return redirect("/")
+    name = request.form["name"]
     try:
         budget = float(request.form["budget"].replace(",", "."))
     except:
@@ -167,17 +209,12 @@ def delete_category(name):
     data = load_data()
     if name in data["categories"]:
         del data["categories"][name]
-        save_data(data)
+    save_data(data)
     return redirect("/")
 
-# ----------------------------------------
-# Détails d'une catégorie
-# ----------------------------------------
 @app.route("/open/<name>")
 def open_cat(name):
     data = load_data()
-    if name not in data["categories"]:
-        return redirect("/")
     cat = data["categories"][name]
     spent = sum(exp["amount"] for exp in cat["expenses"])
     remaining = cat["budget"] - spent
@@ -191,14 +228,7 @@ def open_cat(name):
       input,button{padding:5px;border:none;border-radius:5px;}
       button{background:#5ee65a;cursor:pointer;margin-top:5px;}
       a{color:#5ee65a;text-decoration:none;}
-      a:hover{text-decoration:underline;}
-    </style>
-    <script>
-      function confirmDeleteExpense(label) {
-        return confirm('Supprimer la dépense "' + label + '" ?');
-      }
-    </script>
-    </head><body>
+    </style></head><body>
       <a href="/">← Retour</a>
       <h1>{{name}}</h1>
       <p>Budget : {{cat.budget}} € — Dépensé : {{spent}} € — Reste :
@@ -215,29 +245,19 @@ def open_cat(name):
 
       <div class="box">
         <h2>Dépenses</h2>
-        {% if expenses %}
-          {% for i, exp in expenses %}
-            <p>- {{exp.name}} : {{exp.amount}} €
-            (<a href="/delete_expense/{{name}}/{{i}}" onclick="return confirmDeleteExpense('{{exp.name}}')" style="color:red;">🗑️ supprimer</a>)</p>
-          {% endfor %}
-        {% else %}
-          <p>Aucune dépense enregistrée.</p>
-        {% endif %}
+        {% for i, exp in expenses %}
+          <p>- {{exp.name}} : {{exp.amount}} €
+          (<a href="/delete_expense/{{name}}/{{i}}" style="color:red;">supprimer</a>)</p>
+        {% endfor %}
       </div>
     </body></html>
     """
-    return render_template_string(html, name=name, cat=cat, spent=spent,
-                                  remaining=remaining, expenses=expenses)
+    return render_template_string(html, name=name, cat=cat, spent=spent, remaining=remaining, expenses=expenses)
 
-# ----------------------------------------
-# Gestion des dépenses
-# ----------------------------------------
 @app.route("/add_expense/<name>", methods=["POST"])
 def add_expense(name):
     data = load_data()
-    if name not in data["categories"]:
-        return redirect("/")
-    label = request.form["label"].strip()
+    label = request.form["label"]
     try:
         amount = float(request.form["amount"].replace(",", "."))
     except:
@@ -249,14 +269,14 @@ def add_expense(name):
 @app.route("/delete_expense/<name>/<int:index>")
 def delete_expense(name, index):
     data = load_data()
-    if name in data["categories"]:
-        if 0 <= index < len(data["categories"][name]["expenses"]):
-            del data["categories"][name]["expenses"][index]
-            save_data(data)
+    del data["categories"][name]["expenses"][index]
+    save_data(data)
     return redirect(f"/open/{name}")
 
 # ----------------------------------------
-# Lancement de l'application
+# 🚀 Lancement
 # ----------------------------------------
 if __name__ == "__main__":
+    print("🚀 Lancement de l'application Flask...")
+    load_from_github()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
