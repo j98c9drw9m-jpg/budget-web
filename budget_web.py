@@ -1,12 +1,15 @@
 from flask import Flask, render_template_string, request, redirect
 import json, os
 
+# ----------------------------------------
+# Configuration générale
+# ----------------------------------------
 DATA_FILE = "/tmp/budget_mensuel.json"
 app = Flask(__name__)
 
-# -----------------------------
-# Gestion des données JSON
-# -----------------------------
+# ----------------------------------------
+# Gestion du stockage JSON
+# ----------------------------------------
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r") as f:
@@ -17,9 +20,9 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# -----------------------------
-# Page principale
-# -----------------------------
+# ----------------------------------------
+# Page principale : résumé global
+# ----------------------------------------
 @app.route("/")
 def index():
     data = load_data()
@@ -46,16 +49,19 @@ def index():
     <html>
     <head>
       <meta charset="utf-8">
-      <title>Budget mensuel</title>
+      <title>💰 Mon budget mensuel</title>
       <style>
-        body { font-family: Arial; background: #111; color: #eee; margin: 20px; }
+        body { font-family: Arial, sans-serif; background: #111; color: #eee; margin: 30px; }
         h1, h2 { color: #5ee65a; }
-        .box { background: #222; padding: 15px; margin: 10px 0; border-radius: 10px; }
-        input, button { padding: 5px; border-radius: 5px; border: none; }
-        button { background: #5ee65a; cursor: pointer; margin-top: 5px; }
+        .box { background: #222; padding: 15px; margin: 20px 0; border-radius: 10px; }
+        input, button { padding: 6px; border-radius: 6px; border: none; }
+        button { background: #5ee65a; cursor: pointer; margin-top: 6px; }
+        button:hover { background: #4ed64a; }
         a { color: #5ee65a; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .inline-links a { margin-right: 10px; }
 
-        /* Style de la barre de progression */
+        /* Barre de progression */
         .progress-container {
           width: 100%;
           background-color: #333;
@@ -68,7 +74,14 @@ def index():
           border-radius: 10px;
           transition: width 0.5s;
         }
+
+        .small-text { font-size: 0.9em; color: #aaa; }
       </style>
+      <script>
+        function confirmDeleteCategory(name) {
+          return confirm('Supprimer la catégorie "' + name + '" ? Toutes les dépenses associées seront effacées.');
+        }
+      </script>
     </head>
     <body>
       <h1>💰 Mon budget mensuel</h1>
@@ -86,19 +99,28 @@ def index():
 
       <div class="box">
         <h2>Catégories</h2>
-        {% for cat in categories %}
-          {% set color = 'lime' %}
-          {% if cat.remaining / cat.budget < 0.2 %}
-            {% set color = 'red' %}
-          {% elif cat.remaining / cat.budget < 0.5 %}
-            {% set color = 'orange' %}
-          {% endif %}
-          <p><b>{{cat.name}}</b> — Budget {{cat.budget}} €, Dépensé {{cat.spent}} €</p>
-          <div class="progress-container">
-            <div class="progress-bar" style="width:{{cat.percent}}%; background-color:{{color}};"></div>
-          </div>
-          <p><a href="/open/{{cat.name}}">ouvrir</a></p>
-        {% endfor %}
+        {% if categories %}
+          {% for cat in categories %}
+            {% set ratio = (cat.remaining / cat.budget) if cat.budget > 0 else 1 %}
+            {% set color = 'lime' %}
+            {% if ratio < 0.2 %}
+              {% set color = 'red' %}
+            {% elif ratio < 0.5 %}
+              {% set color = 'orange' %}
+            {% endif %}
+            <p><b>{{cat.name}}</b> — Budget {{cat.budget}} €, Dépensé {{cat.spent}} €</p>
+            <div class="progress-container">
+              <div class="progress-bar" style="width:{{cat.percent}}%; background-color:{{color}};"></div>
+            </div>
+            <div class="inline-links small-text">
+              <a href="/open/{{cat.name}}">🔍 ouvrir</a> |
+              <a href="/delete_category/{{cat.name}}" onclick="return confirmDeleteCategory('{{cat.name}}')" style="color:red;">🗑️ supprimer</a>
+            </div>
+            <hr style="border: none; border-bottom: 1px solid #333; margin: 15px 0;">
+          {% endfor %}
+        {% else %}
+          <p>Aucune catégorie pour le moment.</p>
+        {% endif %}
         <form action="/add_category" method="post">
           <input name="name" placeholder="Nom catégorie" required>
           <input name="budget" placeholder="Budget (€)" required>
@@ -110,9 +132,9 @@ def index():
     return render_template_string(html, revenu=revenu, total_spent=total_spent,
                                   remaining_global=remaining_global, categories=categories)
 
-# -----------------------------
-# Formulaires simples
-# -----------------------------
+# ----------------------------------------
+# Modification du revenu
+# ----------------------------------------
 @app.route("/set_income", methods=["POST"])
 def set_income():
     data = load_data()
@@ -123,10 +145,15 @@ def set_income():
     save_data(data)
     return redirect("/")
 
+# ----------------------------------------
+# Ajout / suppression de catégories
+# ----------------------------------------
 @app.route("/add_category", methods=["POST"])
 def add_category():
     data = load_data()
-    name = request.form["name"]
+    name = request.form["name"].strip()
+    if not name:
+        return redirect("/")
     try:
         budget = float(request.form["budget"].replace(",", "."))
     except:
@@ -135,16 +162,26 @@ def add_category():
     save_data(data)
     return redirect("/")
 
-# -----------------------------
-# Page catégorie
-# -----------------------------
+@app.route("/delete_category/<name>")
+def delete_category(name):
+    data = load_data()
+    if name in data["categories"]:
+        del data["categories"][name]
+        save_data(data)
+    return redirect("/")
+
+# ----------------------------------------
+# Détails d'une catégorie
+# ----------------------------------------
 @app.route("/open/<name>")
 def open_cat(name):
     data = load_data()
+    if name not in data["categories"]:
+        return redirect("/")
     cat = data["categories"][name]
     spent = sum(exp["amount"] for exp in cat["expenses"])
     remaining = cat["budget"] - spent
-    expenses = list(enumerate(cat["expenses"]))  # liste [(index, {name, amount})]
+    expenses = list(enumerate(cat["expenses"]))
 
     html = """
     <html><head><meta charset="utf-8"><title>{{name}}</title>
@@ -154,7 +191,14 @@ def open_cat(name):
       input,button{padding:5px;border:none;border-radius:5px;}
       button{background:#5ee65a;cursor:pointer;margin-top:5px;}
       a{color:#5ee65a;text-decoration:none;}
-    </style></head><body>
+      a:hover{text-decoration:underline;}
+    </style>
+    <script>
+      function confirmDeleteExpense(label) {
+        return confirm('Supprimer la dépense "' + label + '" ?');
+      }
+    </script>
+    </head><body>
       <a href="/">← Retour</a>
       <h1>{{name}}</h1>
       <p>Budget : {{cat.budget}} € — Dépensé : {{spent}} € — Reste :
@@ -171,23 +215,29 @@ def open_cat(name):
 
       <div class="box">
         <h2>Dépenses</h2>
-        {% for i, exp in expenses %}
-          <p>- {{exp.name}} : {{exp.amount}} €
-          (<a href="/delete_expense/{{name}}/{{i}}">supprimer</a>)</p>
-        {% endfor %}
+        {% if expenses %}
+          {% for i, exp in expenses %}
+            <p>- {{exp.name}} : {{exp.amount}} €
+            (<a href="/delete_expense/{{name}}/{{i}}" onclick="return confirmDeleteExpense('{{exp.name}}')" style="color:red;">🗑️ supprimer</a>)</p>
+          {% endfor %}
+        {% else %}
+          <p>Aucune dépense enregistrée.</p>
+        {% endif %}
       </div>
     </body></html>
     """
     return render_template_string(html, name=name, cat=cat, spent=spent,
                                   remaining=remaining, expenses=expenses)
 
-# -----------------------------
-# Ajout / suppression de dépenses
-# -----------------------------
+# ----------------------------------------
+# Gestion des dépenses
+# ----------------------------------------
 @app.route("/add_expense/<name>", methods=["POST"])
 def add_expense(name):
     data = load_data()
-    label = request.form["label"]
+    if name not in data["categories"]:
+        return redirect("/")
+    label = request.form["label"].strip()
     try:
         amount = float(request.form["amount"].replace(",", "."))
     except:
@@ -199,12 +249,14 @@ def add_expense(name):
 @app.route("/delete_expense/<name>/<int:index>")
 def delete_expense(name, index):
     data = load_data()
-    del data["categories"][name]["expenses"][index]
-    save_data(data)
+    if name in data["categories"]:
+        if 0 <= index < len(data["categories"][name]["expenses"]):
+            del data["categories"][name]["expenses"][index]
+            save_data(data)
     return redirect(f"/open/{name}")
 
-# -----------------------------
-# Lancement
-# -----------------------------
+# ----------------------------------------
+# Lancement de l'application
+# ----------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
