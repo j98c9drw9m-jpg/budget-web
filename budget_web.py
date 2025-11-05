@@ -1,7 +1,7 @@
 from flask import Flask, render_template_string, request, redirect
 import json, os
 
-# Chemin du fichier JSON dans un dossier temporaire (autorisé par Render)
+# Fichier de données temporaire (Render ne permet pas d’écriture permanente)
 DATA_FILE = "/tmp/budget_mensuel.json"
 
 app = Flask(__name__)
@@ -25,6 +25,17 @@ def index():
     total_spent = sum(sum(exp["amount"] for exp in cat["expenses"]) for cat in data["categories"].values())
     remaining = revenu - total_spent
 
+    # Préparer les données formatées pour Jinja
+    categories = []
+    for name, cat in data["categories"].items():
+        spent = sum(exp["amount"] for exp in cat["expenses"])
+        categories.append({
+            "name": name,
+            "budget": cat["budget"],
+            "spent": spent,
+            "remaining": cat["budget"] - spent
+        })
+
     html = """
     <html>
     <head>
@@ -44,6 +55,7 @@ def index():
       <p><b>Revenu mensuel :</b> {{revenu}} €</p>
       <p><b>Dépensé :</b> {{total_spent}} €</p>
       <p><b>Reste :</b> <span style="color: {{'red' if remaining<0 else 'lime'}}">{{remaining}} €</span></p>
+
       <div class="box">
         <h2>Modifier le revenu</h2>
         <form action="/set_income" method="post">
@@ -51,12 +63,13 @@ def index():
           <button>Mettre à jour</button>
         </form>
       </div>
+
       <div class="box">
         <h2>Catégories</h2>
-        {% for name, cat in data["categories"].items() %}
-          <p><b>{{name}}</b> — Budget {{cat["budget"]}} €, 
-          Dépensé {{sum(exp["amount"] for exp in cat["expenses"])}} €
-          (<a href="/open/{{name}}">ouvrir</a>)</p>
+        {% for cat in categories %}
+          <p><b>{{cat.name}}</b> — Budget {{cat.budget}} €, 
+          Dépensé {{cat.spent}} € 
+          (<a href="/open/{{cat.name}}">ouvrir</a>)</p>
         {% endfor %}
         <form action="/add_category" method="post">
           <input name="name" placeholder="Nom catégorie" required>
@@ -66,8 +79,10 @@ def index():
       </div>
     </body></html>
     """
-    return render_template_string(html, data=data, revenu=revenu, total_spent=total_spent, remaining=remaining)
 
+    return render_template_string(html, revenu=revenu, total_spent=total_spent, remaining=remaining, categories=categories)
+
+# --- Revenu ---
 @app.route("/set_income", methods=["POST"])
 def set_income():
     data = load_data()
@@ -78,6 +93,7 @@ def set_income():
     save_data(data)
     return redirect("/")
 
+# --- Ajouter une catégorie ---
 @app.route("/add_category", methods=["POST"])
 def add_category():
     data = load_data()
@@ -90,6 +106,7 @@ def add_category():
     save_data(data)
     return redirect("/")
 
+# --- Page catégorie ---
 @app.route("/open/<name>")
 def open_cat(name):
     data = load_data()
@@ -107,7 +124,7 @@ def open_cat(name):
     </style></head><body>
       <a href="/">← Retour</a>
       <h1>{{name}}</h1>
-      <p>Budget : {{cat["budget"]}} € — Dépensé : {{spent}} € — Reste : <b style="color:{{'red' if remaining<0 else 'lime'}}">{{remaining}} €</b></p>
+      <p>Budget : {{cat.budget}} € — Dépensé : {{spent}} € — Reste : <b style="color:{{'red' if remaining<0 else 'lime'}}">{{remaining}} €</b></p>
       <div class="box">
         <h2>Ajouter une dépense</h2>
         <form action="/add_expense/{{name}}" method="post">
@@ -118,8 +135,8 @@ def open_cat(name):
       </div>
       <div class="box">
         <h2>Dépenses</h2>
-        {% for i, exp in enumerate(cat["expenses"]) %}
-          <p>- {{exp["name"]}} : {{exp["amount"]}} € 
+        {% for i, exp in enumerate(cat.expenses) %}
+          <p>- {{exp.name}} : {{exp.amount}} € 
           (<a href="/delete_expense/{{name}}/{{i}}">supprimer</a>)</p>
         {% endfor %}
       </div>
@@ -127,6 +144,7 @@ def open_cat(name):
     """
     return render_template_string(html, name=name, cat=cat, spent=spent, remaining=remaining)
 
+# --- Ajouter une dépense ---
 @app.route("/add_expense/<name>", methods=["POST"])
 def add_expense(name):
     data = load_data()
@@ -139,6 +157,7 @@ def add_expense(name):
     save_data(data)
     return redirect(f"/open/{name}")
 
+# --- Supprimer une dépense ---
 @app.route("/delete_expense/<name>/<int:index>")
 def delete_expense(name, index):
     data = load_data()
@@ -146,5 +165,6 @@ def delete_expense(name, index):
     save_data(data)
     return redirect(f"/open/{name}")
 
+# --- Lancer l'app ---
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
