@@ -30,13 +30,17 @@ def index():
     for name, cat in data["categories"].items():
         spent = sum(exp["amount"] for exp in cat["expenses"])
         total_spent += spent
+        remaining = cat["budget"] - spent
+        percent = (spent / cat["budget"] * 100) if cat["budget"] > 0 else 0
         categories.append({
             "name": name,
             "budget": cat["budget"],
-            "spent": spent
+            "spent": spent,
+            "remaining": remaining,
+            "percent": percent
         })
 
-    remaining = revenu - total_spent
+    remaining_global = revenu - total_spent
 
     html = """
     <html>
@@ -50,13 +54,27 @@ def index():
         input, button { padding: 5px; border-radius: 5px; border: none; }
         button { background: #5ee65a; cursor: pointer; margin-top: 5px; }
         a { color: #5ee65a; text-decoration: none; }
+
+        /* Style de la barre de progression */
+        .progress-container {
+          width: 100%;
+          background-color: #333;
+          border-radius: 10px;
+          margin-top: 5px;
+          height: 14px;
+        }
+        .progress-bar {
+          height: 14px;
+          border-radius: 10px;
+          transition: width 0.5s;
+        }
       </style>
     </head>
     <body>
       <h1>💰 Mon budget mensuel</h1>
       <p><b>Revenu :</b> {{revenu}} €</p>
       <p><b>Dépensé :</b> {{total_spent}} €</p>
-      <p><b>Reste :</b> <span style="color: {{'red' if remaining<0 else 'lime'}}">{{remaining}} €</span></p>
+      <p><b>Reste :</b> <span style="color: {{'red' if remaining_global<0 else 'lime'}}">{{remaining_global}} €</span></p>
 
       <div class="box">
         <h2>Modifier le revenu</h2>
@@ -69,8 +87,17 @@ def index():
       <div class="box">
         <h2>Catégories</h2>
         {% for cat in categories %}
-          <p><b>{{cat.name}}</b> — Budget {{cat.budget}} €, Dépensé {{cat.spent}} €
-          (<a href="/open/{{cat.name}}">ouvrir</a>)</p>
+          {% set color = 'lime' %}
+          {% if cat.remaining / cat.budget < 0.2 %}
+            {% set color = 'red' %}
+          {% elif cat.remaining / cat.budget < 0.5 %}
+            {% set color = 'orange' %}
+          {% endif %}
+          <p><b>{{cat.name}}</b> — Budget {{cat.budget}} €, Dépensé {{cat.spent}} €</p>
+          <div class="progress-container">
+            <div class="progress-bar" style="width:{{cat.percent}}%; background-color:{{color}};"></div>
+          </div>
+          <p><a href="/open/{{cat.name}}">ouvrir</a></p>
         {% endfor %}
         <form action="/add_category" method="post">
           <input name="name" placeholder="Nom catégorie" required>
@@ -78,11 +105,10 @@ def index():
           <button>Ajouter</button>
         </form>
       </div>
-    </body>
-    </html>
+    </body></html>
     """
     return render_template_string(html, revenu=revenu, total_spent=total_spent,
-                                  remaining=remaining, categories=categories)
+                                  remaining_global=remaining_global, categories=categories)
 
 # -----------------------------
 # Formulaires simples
